@@ -7,6 +7,7 @@ import kafka.security.auth.Authorizer;
 import kafka.security.auth.Operation;
 import kafka.security.auth.Resource;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
+import org.apache.log4j.Logger;
 import scala.collection.immutable.Map;
 import scala.collection.immutable.Set;
 
@@ -18,7 +19,6 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import org.apache.log4j.Logger;
 
 /**
  *
@@ -140,18 +140,18 @@ public class HopsAclAuthorizer implements Authorizer {
     }
     if (resource.resourceType().equals(
         kafka.security.auth.ResourceType$.MODULE$.fromString(Consts.GROUP))) {
-      //Check if group requested starts with projectname__ and is equal to the current users project
-      String projectCN = projectName__userName.split(Consts.PROJECT_USER_DELIMITER)[0];
-      if (resource.name().contains(Consts.PROJECT_USER_DELIMITER)) {
-        String projectConsumerGroup = resource.name().split(Consts.PROJECT_USER_DELIMITER)[0];
-        LOG.debug("Consumer group :: projectCN:" + projectCN);
-        LOG.debug("Consumer group :: projectConsumerGroup:" + projectConsumerGroup);
-        //Chec
-        if (!projectCN.equals(projectConsumerGroup)) {
-          LOG.info("Principal:" + projectName__userName + " is not allowed to access group:" + resource.name());
-          return false;
-        }
-      }
+//      //Check if group requested starts with projectname__ and is equal to the current users project
+//      String projectCN = projectName__userName.split(Consts.PROJECT_USER_DELIMITER)[0];
+//      if (resource.name().contains(Consts.PROJECT_USER_DELIMITER)) {
+//        String projectConsumerGroup = resource.name().split(Consts.PROJECT_USER_DELIMITER)[0];
+//        LOG.debug("Consumer group :: projectCN:" + projectCN);
+//        LOG.debug("Consumer group :: projectConsumerGroup:" + projectConsumerGroup);
+//        //Chec
+//        if (!projectCN.equals(projectConsumerGroup)) {
+//          LOG.info("Principal:" + projectName__userName + " is not allowed to access group:" + resource.name());
+//          return false;
+//        }
+//      }
       LOG.info("Principal:" + projectName__userName + " is allowed to access group:" + resource.name());
       return true;
     }
