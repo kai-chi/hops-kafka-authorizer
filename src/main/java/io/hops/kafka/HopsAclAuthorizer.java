@@ -4,6 +4,7 @@ import io.hops.kafka.authorizer.tables.HopsAcl;
 import kafka.network.RequestChannel;
 import kafka.security.auth.Acl;
 import kafka.security.auth.Authorizer;
+import kafka.security.auth.Create;
 import kafka.security.auth.Operation;
 import kafka.security.auth.Resource;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
@@ -134,7 +135,8 @@ public class HopsAclAuthorizer implements Authorizer {
     boolean authorized;
     
     if (resource.resourceType().equals(
-        kafka.security.auth.ResourceType$.MODULE$.fromString(Consts.CLUSTER))) {
+        kafka.security.auth.ResourceType$.MODULE$.fromString(Consts.CLUSTER)) &&
+        !operation.name().equals(Create.name())) {
       LOG.info("This is cluster authorization for broker: " + projectName__userName);
       return false;
     }
