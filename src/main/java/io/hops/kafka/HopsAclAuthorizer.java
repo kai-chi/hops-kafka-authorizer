@@ -6,18 +6,30 @@ import kafka.security.auth.Acl;
 import kafka.security.auth.Authorizer;
 import kafka.security.auth.Operation;
 import kafka.security.auth.Resource;
+import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.AdminClientConfig;
+import org.apache.kafka.clients.admin.ConsumerGroupDescription;
+import org.apache.kafka.clients.admin.MemberAssignment;
+import org.apache.kafka.clients.admin.MemberDescription;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.common.config.SslConfigs;
 import org.apache.kafka.common.security.auth.KafkaPrincipal;
 import scala.collection.immutable.Map;
 import scala.collection.immutable.Set;
 
 import java.sql.SQLException;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Properties;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+
 import org.apache.log4j.Logger;
 
 /**
@@ -39,6 +51,7 @@ public class HopsAclAuthorizer implements Authorizer {
   DbConnection dbConnection;
   //<TopicName,<Principal,HopsAcl>>
   final ConcurrentMap<String, java.util.Map<String, List<HopsAcl>>> acls = new ConcurrentHashMap<>();
+  AdminClient adminClient;
   
   /**
    * Guaranteed to be called before any authorize call is made.
@@ -79,6 +92,23 @@ public class HopsAclAuthorizer implements Authorizer {
     //grap the default acl property
     shouldAllowEveryoneIfNoAclIsFound = Boolean.valueOf(
         configs.get(Consts.ALLOW_EVERYONE_IF_NO_ACS_FOUND_PROP).toString());
+  
+    //configure AdminClient
+    Properties properties = new Properties();
+    properties.setProperty(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG, "SSL");
+    properties.setProperty(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG,
+      configs.get(SslConfigs.SSL_TRUSTSTORE_LOCATION_CONFIG).toString());
+    properties.setProperty(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG,
+      configs.get(SslConfigs.SSL_TRUSTSTORE_PASSWORD_CONFIG).toString());
+    properties.setProperty(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG,
+      configs.get(SslConfigs.SSL_KEYSTORE_LOCATION_CONFIG).toString());
+    properties.setProperty(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG,
+      configs.get(SslConfigs.SSL_KEYSTORE_PASSWORD_CONFIG).toString());
+    properties.setProperty(SslConfigs.SSL_KEY_PASSWORD_CONFIG,
+      configs.get(SslConfigs.SSL_KEY_PASSWORD_CONFIG).toString());
+    properties.setProperty(SslConfigs.SSL_ENDPOINT_IDENTIFICATION_ALGORITHM_CONFIG, "");
+    properties.setProperty(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, "10.0.2.15:9091");
+    adminClient = AdminClient.create(properties);
     
     //Start the ACLs update thread
     ExecutorService executor = Executors.newSingleThreadExecutor();
@@ -132,17 +162,36 @@ public class HopsAclAuthorizer implements Authorizer {
       return true;
     }
     boolean authorized;
-    
     if (resource.resourceType().equals(
         kafka.security.auth.ResourceType$.MODULE$.fromString(Consts.CLUSTER))) {
       LOG.info("This is cluster authorization for broker: " + projectName__userName);
       return false;
     }
+    try {
+      ConsumerGroupDescription cg = adminClient.describeConsumerGroups(Collections.singleton(resource.name())).all()
+        .get().get(resource.name());
+      java.util.Set<String> s = cg
+        .members()
+        .stream()
+        .map(MemberDescription::assignment)
+        .map(MemberAssignment::topicPartitions)
+        .reduce(Collections.emptySet(), this::mergeSets)
+        .stream()
+        .map(TopicPartition::topic)
+        .collect(Collectors.toSet());
+      LOG.info("CG: " + cg);
+      LOG.info("CG2: " + String.join(" ", s));
+    } catch (Exception e) {
+      LOG.error("gulp " + e);
+    }
     if (resource.resourceType().equals(
         kafka.security.auth.ResourceType$.MODULE$.fromString(Consts.GROUP))) {
       //Check if group requested starts with projectname__ and is equal to the current users project
       String projectCN = projectName__userName.split(Consts.PROJECT_USER_DELIMITER)[0];
-      if (resource.name().contains(Consts.PROJECT_USER_DELIMITER)) {
+      // properly find out the topic
+      // get the project they are consuming from
+      //
+      /*if (resource.name().contains(Consts.PROJECT_USER_DELIMITER)) {
         String projectConsumerGroup = resource.name().split(Consts.PROJECT_USER_DELIMITER)[0];
         LOG.debug("Consumer group :: projectCN:" + projectCN);
         LOG.debug("Consumer group :: projectConsumerGroup:" + projectConsumerGroup);
@@ -151,7 +200,7 @@ public class HopsAclAuthorizer implements Authorizer {
           LOG.info("Principal:" + projectName__userName + " is not allowed to access group:" + resource.name());
           return false;
         }
-      }
+      }*/
       LOG.info("Principal:" + projectName__userName + " is allowed to access group:" + resource.name());
       return true;
     }
@@ -210,6 +259,13 @@ public class HopsAclAuthorizer implements Authorizer {
     
     //logAuditMessage(principal, authorized, operation, resource, host);
     return authorized;
+  }
+  
+  private java.util.Set<TopicPartition> mergeSets(java.util.Set<TopicPartition> a, java.util.Set<TopicPartition> b)
+  {
+    java.util.Set<TopicPartition> set = new HashSet<>(a);
+    set.addAll(b);
+    return set;
   }
   
   private Boolean aclMatch(String operations, String principal,
